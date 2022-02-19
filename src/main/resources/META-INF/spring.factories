@@ -1,2 +1,4 @@
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-com.github.ricorodriges.metrics.MetricViewsEndpointAutoConfiguration
+com.github.ricorodriges.metricui.MetricViewEndpointAutoConfiguration,\
+com.github.ricorodriges.metricui.MetricUiMvcAutoConfiguration,\
+com.github.ricorodriges.metricui.MetricUIConfigProperties

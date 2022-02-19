@@ -1,0 +1,6 @@
+.idea
+target
+
+example/.idea
+example/.gradle
+example/build

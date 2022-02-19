@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+
+    <title>Metrics</title>
+
+    <link type="text/css" rel="stylesheet" href="//unpkg.com/bootstrap@4/dist/css/bootstrap.min.css"/>
+    <link type="text/css" rel="stylesheet" href="//unpkg.com/bootstrap-vue@2/dist/bootstrap-vue.min.css"/>
+
+    <script src="//unpkg.com/vue@2/dist/vue.min.js"></script>
+    <script src="//unpkg.com/bootstrap-vue@2/dist/bootstrap-vue.min.js"></script>
+
+    <script>
+      var ACTUATOR_URL = "$ACTUATOR_URL";
+	  var METRIC_URL = ACTUATOR_URL + "/metricView";
+      var HEALTH_URL = ACTUATOR_URL + "/health";
+      var THREADDUMP_URL = ACTUATOR_URL + "/threaddump";
+    </script>
+  </head>
+  <body>
+    <div id="app" class="container-fluid my-2">
+      <b-alert v-if="metrics.error" show variant="danger">
+        <h4 class="alert-heading">Metric update</h4>
+        <p>{{ metrics.error }}</p>
+      </b-alert>
+
+      <b-button v-if="metrics.loading" disabled variant="primary"
+        ><b-spinner small></b-spinner>Downloading...</b-button
+      >
+      <b-button v-else @click="updateMetrics()" variant="primary"
+        >Update metrics</b-button
+      >
+
+      <threads-dump class="mx-3"></threads-dump>
+
+      <div v-if="metrics.data">
+        <div v-for="section in metrics.data">
+          <h2 class="my-3">{{ section.name }}</h2>
+          <div class="row">
+            <sub-section
+              v-for="subSection in section.subSections"
+              :data="subSection"
+            ></sub-section>
+          </div>
+        </div>
+      </div>
+
+      <h1 class="mt-4">Health checks</h1>
+      <b-alert v-if="health.error" show variant="danger">
+        <h4 class="alert-heading">Health check update</h4>
+        <p>{{ health.error }}</p>
+      </b-alert>
+
+      <b-button v-if="health.loading" disabled variant="primary"
+        ><b-spinner small></b-spinner>Downloading...</b-button
+      >
+      <b-button v-else @click="updateHealthChecks()" variant="primary"
+        >Update health checks</b-button
+      >
+
+      <div v-if="health.data && health.data.status" class="my-3">
+        <health-components
+          v-if="health.data.components"
+          :components="health.data.components"
+        ></health-components>
+        <div v-else>Application status is <b>{{ health.data.status }}</b></div>
+      </div>
+    </div>
+
+    <script>
+      Vue.component("sub-section", {
+        props: ["data"],
+        template:
+          '<div :class="widthToClassname(data.width)"> \
+           <b-card :title="data.name" class="my-2"> \
+             <b-card-text> \
+               <div class="row"> \
+                 <metric-view v-for="view in data.views" :view="view"></metric-view> \
+               </div> \
+             </b-card-text> \
+           </b-card> \
+           </div>',
+      });
+
+      Vue.component("metric-view", {
+        props: ["view"],
+        template:
+          '<div :class="widthToClassname(view.width) + \' my-2\'"> \
+             <progress-view v-if="view.type === \'progress\'" :title="view.title" :max="view.max" :description="view.description" :values="view.values"></progress-view> \
+             <label-view v-if="view.type === \'label\'" :label="view.label" :html="view.html"></label-view> \
+             <table-view v-if="view.type === \'table\'" :title="view.title" :fields="view.headers" :values="view.values"></table-view> \
+             <composite-view v-if="view.type === \'composite\'" :title="view.title" :views="view.views"></composite-view> \
+           </div>',
+      });
+
+      Vue.component("composite-view", {
+        props: ["title", "views"],
+        template:
+          '<div> \
+             <h4 v-if="title" class="my-3">{{ title }}</h4> \
+             <div class="row"> \
+               <metric-view v-for="view in views" :view="view"></metric-view> \
+             </div> \
+           </div>',
+      });
+
+      Vue.component("progress-view", {
+        props: ["title", "max", "description", "values"],
+        template:
+          '<div> \
+             <h5 v-if="title">{{ title }}</h5> \
+             <b-progress :max="max"> \
+               <b-progress-bar v-for="value in values" \
+                               :variant="colorToVariant(value.color)" \
+                               :value="value.value" animated show-progress \
+                               v-b-popover.hover.top="value.hover ? {html:value.hover.html,title:value.hover.title,content:value.hover.text} : null"> \
+               </b-progress-bar> \
+             </b-progress> \
+             <div v-if="description">{{ description }}</div> \
+           </div>',
+      });
+
+      Vue.component("label-view", {
+        props: ["label", "html"],
+        template:
+          '<div v-if="label"> \
+             <div v-if="html" v-html="label"></div> \
+             <div v-else style="white-space:pre-wrap;">{{ label }}</div> \
+           </div>',
+      });
+
+      Vue.component("table-view", {
+        props: ["title", "fields", "values"],
+        computed: {
+          _fields: function () {
+            return this.fields.map((n) => ({
+              key: n,
+              label: n,
+              sortable: true,
+            }));
+          },
+          _values: function () {
+            const f = this._fields;
+            return this.values.map((v) => {
+              const _v = {};
+              v.forEach((n, i) => {
+                _v[f[i].key] = n;
+              });
+              return _v;
+            });
+          },
+        },
+        template:
+          '<div> \
+              <h5 v-if="title">{{ title }}</h5> \
+              <b-table striped hover :items="_values" :fields="_fields"></b-table> \
+            </div>',
+      });
+
+      Vue.component("health-components", {
+        props: ["components"],
+        computed: {
+          _fields: function () {
+            const r = [{ key: "name", label: "Name" }];
+            if (Object.values(this.components).find((e) => !!e.details)) {
+              r.push({ key: "details", label: "Details" });
+            }
+            if (Object.values(this.components).find((e) => !!e.components)) {
+              r.push({ key: "components", label: "Components" });
+            }
+            return r;
+          },
+          _values: function () {
+            const r = [];
+            for (const [key, value] of Object.entries(this.components)) {
+              r.push({
+                name: key,
+                status: value.status,
+                details: value.details,
+                components: value.components,
+              });
+            }
+            return r;
+          },
+        },
+        template:
+          '<b-table hover :items="_values" :fields="_fields"> \
+             <template #cell(name)="data"> \
+               {{ data.value }} \
+               <b-badge :variant="data.item.status === \'UP\' ? \'success\' : \'danger\'">{{ data.item.status }}</b-badge> \
+             </template> \
+             <template #cell(details)="data"> \
+               <pre v-if="data.value">{{ JSON.stringify(data.value, null, 2) }}</pre> \
+             </template> \
+             <template #cell(components)="data"> \
+               <health-components v-if="data.item.components" :components="data.item.components"></health-components> \
+             </template> \
+           </b-table>',
+      });
+
+      Vue.component("threads-dump", {
+        props: [],
+        data: function () {
+          return {
+            dump: {
+              data: null,
+              loading: false,
+              error: null,
+            },
+          };
+        },
+        methods: {
+          updateAndOpen: function () {
+            this.dump.data = null;
+            fetchAndStore(
+              this.dump,
+              THREADDUMP_URL,
+              (e) => "Unable to get threads dump. Error: " + e
+            );
+            this.$refs["threaddump-modal"].show();
+          },
+        },
+        template:
+          '<span> \
+             <b-button @click="updateAndOpen()" variant="primary">Threads dump</b-button> \
+             <b-modal ref="threaddump-modal" size="xl" title="Threads dump" ok-only> \
+               <b-alert v-if="dump.error" show variant="danger"> \
+                 <h4 class="alert-heading">Threads dump update</h4> \
+                 <p>{{ dump.error }}</p> \
+               </b-alert> \
+               <b-spinner v-if="dump.loading" style="width: 3rem; height: 3rem;"></b-spinner> \
+               <div v-if="dump.data"> \
+                 <div v-for="t in dump.data.threads" :key="t.threadId" class="my-4"> \
+                   {{ t.threadName }} (ID: {{ t.threadId }}) <b-badge :variant="colorToVariant(threadStateToColor(t.threadState))">{{ t.threadState }}</b-badge> \
+                   <b-table small :items="[{\'Priority\':t.priority,\'Blocked Count\':t.blockedCount,\'Waited Count\':t.waitedCount}]"></b-table> \
+                   <div v-if="t.lockName">Blocked by <i>{{ t.lockName }}</i></div> \
+                   <div v-if="t.lockedMonitors && t.lockedMonitors.length || t.lockedSynchronizers && t.lockedSynchronizers.length"> \
+                     <b-button size="sm" v-b-toggle="\'monitors-collapse-\' + t.threadId" variant="primary">Locked Monitors and Synchronizers</b-button> \
+                     <b-collapse :id="\'monitors-collapse-\' + t.threadId" class="mt-2"> \
+                       <b-card><div class="card-text"> \
+                         Monitors:<br/>\
+                         <div v-for="m in t.lockedMonitors" \
+                              v-b-popover.hover.top="m.lockedStackFrame ? `${m.lockedStackFrame.className}.${m.lockedStackFrame.methodName} (${m.lockedStackFrame.fileName}:${m.lockedStackFrame.lineNumber})` : null"> \
+                           {{ m.className }} \
+                         </div> \
+                         Synchronizers: <div v-for="m in t.lockedSynchronizers">{{ m.className }}</div> \
+                       </div></b-card> \
+                     </b-collapse> \
+                   </div> \
+                   <div v-if="t.stackTrace"> \
+                     <b-button size="sm" v-b-toggle="\'stacktrace-collapse-\' + t.threadId" variant="primary">Stack Trace</b-button> \
+                     <b-collapse :id="\'stacktrace-collapse-\' + t.threadId" class="mt-2"> \
+                       <b-card><div class="card-text"> \
+                         <div v-for="s in t.stackTrace">{{ s.className }}.{{ s.methodName }} ({{ s.fileName }}:{{ s.lineNumber }})</div> \
+                       </div></b-card> \
+                     </b-collapse> \
+                   </div> \
+                 </div> \
+               </div> \
+             </b-modal> \
+           </span>',
+      });
+
+      var app = new Vue({
+        el: "#app",
+        data: {
+          metrics: {
+            data: null,
+            loading: false,
+            error: null,
+          },
+          health: {
+            data: null,
+            loading: false,
+            error: null,
+          },
+        },
+        methods: {
+          updateMetrics: function () {
+            fetchAndStore(
+              this.metrics,
+              METRIC_URL,
+              (e) => "Unable to get metric views. Error: " + e
+            );
+          },
+          updateHealthChecks: function () {
+            fetchAndStore(
+              this.health,
+              HEALTH_URL,
+              (e) => "Unable to get health checks. Error: " + e
+            );
+          },
+        },
+      });
+
+      app.updateMetrics();
+      app.updateHealthChecks();
+
+      function colorToVariant(color) {
+        switch (color) {
+          case "GREEN":
+            return "success";
+          case "YELLOW":
+            return "warning";
+          case "RED":
+            return "danger";
+          case "LIGHT_BLUE":
+            return "info";
+          case "BLUE":
+          default:
+            return "primary";
+        }
+      }
+
+      function threadStateToColor(state) {
+        switch (state) {
+          case "NEW":
+          case "RUNNABLE":
+            return "GREEN";
+          case "WAITING":
+          case "TIMED_WAITING":
+            return "YELLOW";
+          case "BLOCKED":
+          case "TERMINATED":
+            return "RED";
+          default:
+            return null;
+        }
+      }
+
+      function widthToClassname(width) {
+        switch (width) {
+          case "HALF":
+            return "col-12 col-lg-6";
+          case "THIRD":
+            return "col-12 col-xl-4";
+          case "QUARTER":
+            return "col-12 col-lg-6 col-xl-3";
+          case "FILL_REMAINING":
+            return "col";
+          case "ROW":
+          default:
+            return "col-12";
+        }
+      }
+
+      function fetchAndStore(store, url, error) {
+        if (store.loading) return;
+        store.loading = true;
+        store.error = null;
+        fetch(url)
+          .then((r) => r.json())
+          .then((d) => {
+            store.data = d;
+            store.loading = false;
+          })
+          .catch((e) => {
+            store.data = null;
+            store.error = error(e);
+            store.loading = false;
+          });
+      }
+    </script>
+  </body>
+</html>
