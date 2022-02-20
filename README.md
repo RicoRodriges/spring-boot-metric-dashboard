@@ -39,7 +39,7 @@ First you need to include dependency:
 ```xml
 
 <dependency>
-  <groupId>com.github.ricorodriges.metricuicom.github.ricorodriges.metricui</groupId>
+  <groupId>com.github.ricorodriges.metricui</groupId>
   <artifactId>spring-boot-metric-dashboard</artifactId>
   <scope>runtime</scope>
 </dependency>
